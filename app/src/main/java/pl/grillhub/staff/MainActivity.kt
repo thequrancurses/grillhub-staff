@@ -70,10 +70,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import kotlinx.coroutines.launch
 
 private val Red = Color(0xFFE11E26)
@@ -331,6 +333,7 @@ fun CameraPreview(modifier: Modifier, onCode: (String) -> Unit) {
             val provider = future.get()
             val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
             val analysis = ImageAnalysis.Builder()
+                .setTargetResolution(android.util.Size(1280, 720))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
             analysis.setAnalyzer(ContextCompat.getMainExecutor(c), QrAnalyzer(onCode))
             provider.unbindAll()
@@ -341,22 +344,36 @@ fun CameraPreview(modifier: Modifier, onCode: (String) -> Unit) {
 }
 
 class QrAnalyzer(private val onResult: (String) -> Unit) : ImageAnalysis.Analyzer {
-    private val scanner = BarcodeScanning.getClient(
-        BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
-    )
+    private val reader = MultiFormatReader().apply {
+        setHints(mapOf(
+            DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+            DecodeHintType.TRY_HARDER to true
+        ))
+    }
     @Volatile private var done = false
 
-    @androidx.annotation.OptIn(ExperimentalGetImage::class)
     override fun analyze(proxy: ImageProxy) {
-        val media = proxy.image
-        if (media == null || done) { proxy.close(); return }
-        val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
-        scanner.process(image)
-            .addOnSuccessListener { list ->
-                val v = list.firstOrNull()?.rawValue
-                if (v != null && !done) { done = true; onResult(v) }
+        try {
+            if (done) return
+            val plane = proxy.planes[0]
+            val buf = plane.buffer
+            val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
+            val rowStride = plane.rowStride
+            val rows = bytes.size / rowStride
+            val src = PlanarYUVLuminanceSource(bytes, rowStride, rows, 0, 0, proxy.width, proxy.height, false)
+            val result = try {
+                reader.decodeWithState(BinaryBitmap(HybridBinarizer(src)))
+            } catch (e: Exception) { null } finally { reader.reset() }
+            val text = result?.text
+            if (text != null && !done) {
+                done = true
+                onResult(text)
             }
-            .addOnCompleteListener { proxy.close() }
+        } catch (e: Throwable) {
+            // ignore frame
+        } finally {
+            proxy.close()
+        }
     }
 }
 

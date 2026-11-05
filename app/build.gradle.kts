@@ -15,10 +15,26 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("staff-release.jks")
+            storePassword = "grillhubstaff"
+            keyAlias = "staff"
+            keyPassword = "grillhubstaff"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+    packaging {
+        resources.excludes += setOf("META-INF/*.version", "META-INF/DEPENDENCIES", "DebugProbesKt.bin", "kotlin-tooling-metadata.json", "**/*.kotlin_builtins", "META-INF/*.kotlin_module")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -48,8 +64,5 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.3.4")
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-
-    // Secure PIN storage (Android Keystore backed)
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("com.google.zxing:core:3.5.3")
 }
